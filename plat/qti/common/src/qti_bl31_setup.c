@@ -34,13 +34,15 @@
 #include <qti_interrupt_svc.h>
 #include <qti_plat.h>
 #include <qti_uart_console.h>
+#ifdef TFA_BL31_RING_LOG_BASE
 #include <qti_ringbuf_console.h>
 
 struct console_ringbuf g_qti_bl31_ringbuf;
-
-/* Variables to hold QTI UART and ring buffer configuration */
-static console_t g_qti_console_uart;
 static console_t g_qti_console_ringbuf;
+#endif
+
+/* Variable to hold QTI UART configuration */
+static console_t g_qti_console_uart;
 
 /*
  * Placeholder variables for copying the BL32 and Bl33 arguments that have been
@@ -66,13 +68,13 @@ void bl31_early_platform_setup(u_register_t from_bl2,
 	console_set_scope(&g_qti_console_uart, CONSOLE_FLAG_RUNTIME |
 			  CONSOLE_FLAG_BOOT | CONSOLE_FLAG_CRASH);
 
+#ifdef TFA_BL31_RING_LOG_BASE
 	qti_console_ringbuf_init(&g_qti_bl31_ringbuf);
 	qti_console_ringbuf_register(&g_qti_console_ringbuf,
 				     &g_qti_bl31_ringbuf);
 	console_set_scope(&g_qti_console_ringbuf, CONSOLE_FLAG_RUNTIME |
 			  CONSOLE_FLAG_BOOT | CONSOLE_FLAG_CRASH);
 
-#ifdef TFA_BL31_RING_LOG_BASE
 	/* Publish the ring buffer location in the platform pointer slot. */
 	*(uint64_t *)TFA_BL31_RING_LOG_BASE = (uint64_t)(&g_qti_bl31_ringbuf);
 #endif
