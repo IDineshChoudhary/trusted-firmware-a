@@ -56,7 +56,7 @@ struct cmd_db_header {
 
 static struct cmd_db_header *g_cmd_db;
 
-static int cmd_db_init(void)
+int qti_cmd_db_init(void)
 {
 	struct cmd_db_header *hdr =
 		(struct cmd_db_header *)(uintptr_t)QTI_AOP_CMD_DB_BASE;
@@ -105,9 +105,7 @@ static const struct cmd_db_entry *cmd_db_find_entry(
 	}
 
 	if (g_cmd_db == NULL) {
-		if (cmd_db_init() != 0) {
-			return NULL;
-		}
+		return NULL;
 	}
 
 	key = res_id_to_u64(res_id);
