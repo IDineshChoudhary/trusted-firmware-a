@@ -16,6 +16,7 @@
 #include <drivers/qti/accesscontrol/xpu.h>
 #include <drivers/qti/chipinfo/chipinfo.h>
 #include <drivers/qti/clock/clock.h>
+#include <drivers/qti/cmd_db/cmd_db.h>
 #include <drivers/qti/coreinit/coreinit.h>
 #include <drivers/qti/icb/icb_error.h>
 #include <drivers/qti/icb/icbcfg.h>
@@ -131,6 +132,9 @@ void bl31_platform_setup(void)
 
 	plat_qti_gic_driver_init();
 	plat_qti_gic_init();
+	if (qti_cmd_db_init() != 0) {
+		WARN("Cmd DB initialization error\n");
+	}
 	qti_pdc_init();
 	qti_pwr_utils_init();
 	qti_smem_init();
