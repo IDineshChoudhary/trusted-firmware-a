@@ -132,6 +132,8 @@ void bl31_platform_setup(void)
 
 	plat_qti_gic_driver_init();
 	plat_qti_gic_init();
+	qti_smem_init();
+	qti_rpmh_init();
 	if (qti_cmd_db_init() != 0) {
 		ERROR("Cmd DB initialization error\n");
 		panic();
