@@ -24,6 +24,7 @@
 #include <drivers/qti/icb/icbuarb.h>
 #include <drivers/qti/pdc/pdc.h>
 #include <drivers/qti/pwr_utils/pwr_utils.h>
+#include <drivers/qti/qtipmlib/qtipmlib.h>
 #include <drivers/qti/qtimer/qtimer.h>
 #include <drivers/qti/rpmh/rpmh.h>
 #include <drivers/qti/sec_core/sec_core.h>
@@ -124,6 +125,7 @@ static void clocked_boot_init(void)
 	qti_accesscontrol_init();
 	qti_vpp_init();
 	qti_cprh_init();
+	qtipmlib_init();
 }
 
 /*******************************************************************************
