@@ -125,7 +125,7 @@ static void clocked_boot_init(void)
 	qti_accesscontrol_init();
 	qti_vpp_init();
 	qti_cprh_init();
-	qtipmlib_init();
+	qti_qtipmlib_init();
 }
 
 /*******************************************************************************

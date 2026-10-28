@@ -24,9 +24,14 @@ enum qtipmlib_lpm_node_id {
 };
 
 #ifdef QTI_PMLIB_ENABLED
+void qti_qtipmlib_init(void);
 int qtipmlib_init(void);
 int qtipmlib_config_lpm(enum qtipmlib_lpm_node_id node_id, int mode_id);
 #else
+static inline void qti_qtipmlib_init(void)
+{
+}
+
 static inline int qtipmlib_init(void)
 {
 	return QTIPMLIB_SUCCESS;

@@ -115,7 +115,7 @@ include drivers/qti/chipinfo/chipinfo.mk
 include drivers/qti/vpp/vpp.mk
 include drivers/qti/cprh/cprh.mk
 
-QTIPMLIB_PATH	?=
+QTIPMLIB_PATH	?=	drivers/qti/qtipmlib/$(CHIPSET)/libqtipmlib.a
 include drivers/qti/qtipmlib/qtipmlib.mk
 
 PLAT_INCLUDES   +=	-Iinclude/drivers/qti/sec_core/${CHIPSET}		\

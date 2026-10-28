@@ -35,6 +35,9 @@ typedef int32_t (*fuse_cb_t)(void);
 
 typedef struct {
 	uint32_t freq_khz;
+	uint8_t clk_src;
+	uint8_t max_core_count;
+	uint8_t lval;
 	uint16_t ref_mv;
 	uint16_t floor_range_mv;
 	uint8_t ro;
@@ -216,32 +219,32 @@ static int32_t cpr12_quot_offset(void)
 }
 
 static vpp_voltage_setting_t silver_settings[] = {
-	{ 768000, 644, 136, 13, cpr10_targ_volt_lsvs, cpr10_quot_min_lsvs },
-	{ 1017600, 728, 176, 13, cpr10_targ_volt_svs, cpr10_quot_min_svs, cpr10_quot_offset },
-	{ .freq_khz = 1094400 },
-	{ 1497600, 872, 220, 13, cpr10_targ_volt_nom, cpr10_quot_min_nom, cpr10_quot_offset },
-	{ .freq_khz = 1612800 },
-	{ 1804800, 988, 260, 7, cpr10_targ_volt_tur, cpr10_quot_min_tur, cpr10_quot_offset },
-	{ 2208000, 988, 260, 7, cpr10_targ_volt_boost, cpr10_quot_min_boost, cpr10_quot_offset },
+	{ 768000, 1, 4, 40, 644, 136, 13, cpr10_targ_volt_lsvs, cpr10_quot_min_lsvs },
+	{ 1017600, 1, 4, 53, 728, 176, 13, cpr10_targ_volt_svs, cpr10_quot_min_svs, cpr10_quot_offset },
+	{ .freq_khz = 1094400, .clk_src = 1, .max_core_count = 4, .lval = 57 },
+	{ 1497600, 1, 4, 78, 872, 220, 13, cpr10_targ_volt_nom, cpr10_quot_min_nom, cpr10_quot_offset },
+	{ .freq_khz = 1612800, .clk_src = 1, .max_core_count = 4, .lval = 84 },
+	{ 1804800, 1, 4, 94, 988, 260, 7, cpr10_targ_volt_tur, cpr10_quot_min_tur, cpr10_quot_offset },
+	{ 2208000, 1, 4, 115, 988, 260, 7, cpr10_targ_volt_boost, cpr10_quot_min_boost, cpr10_quot_offset },
 };
 
 static vpp_voltage_setting_t l3_settings[] = {
-	{ 556800, 644, 136, 13, cpr12_targ_volt_lsvs, cpr12_quot_min_lsvs },
-	{ 806400, 728, 172, 13, cpr12_targ_volt_svs, cpr12_quot_min_svs, cpr12_quot_offset },
-	{ .freq_khz = 940800 },
-	{ 1209600, 872, 224, 13, cpr12_targ_volt_nom, cpr12_quot_min_nom, cpr12_quot_offset },
-	{ .freq_khz = 1344000 },
-	{ 1363200, 988, 296, 7, cpr12_targ_volt_tur, cpr12_quot_min_tur, cpr12_quot_offset },
+	{ 556800, 1, 4, 29, 644, 136, 13, cpr12_targ_volt_lsvs, cpr12_quot_min_lsvs },
+	{ 806400, 1, 4, 42, 728, 172, 13, cpr12_targ_volt_svs, cpr12_quot_min_svs, cpr12_quot_offset },
+	{ .freq_khz = 940800, .clk_src = 1, .max_core_count = 4, .lval = 49 },
+	{ 1209600, 1, 4, 63, 872, 224, 13, cpr12_targ_volt_nom, cpr12_quot_min_nom, cpr12_quot_offset },
+	{ .freq_khz = 1344000, .clk_src = 1, .max_core_count = 4, .lval = 70 },
+	{ 1363200, 1, 4, 71, 988, 296, 7, cpr12_targ_volt_tur, cpr12_quot_min_tur, cpr12_quot_offset },
 };
 
 static vpp_voltage_setting_t gold_settings[] = {
-	{ 768000, 644, 132, 13, cpr11_targ_volt_lsvs, cpr11_quot_min_lsvs },
-	{ 1017600, 728, 164, 13, cpr11_targ_volt_svs, cpr11_quot_min_svs, cpr11_quot_offset },
-	{ .freq_khz = 1190400 },
-	{ 1497600, 872, 204, 13, cpr11_targ_volt_nom, cpr11_quot_min_nom, cpr11_quot_offset },
-	{ .freq_khz = 1708800 },
-	{ 1900800, 988, 192, 7, cpr11_targ_volt_tur, cpr11_quot_min_tur, cpr11_quot_offset },
-	{ 2208000, 988, 192, 7, cpr11_targ_volt_boost, cpr11_quot_min_boost, cpr11_quot_offset },
+	{ 768000, 1, 4, 40, 644, 132, 13, cpr11_targ_volt_lsvs, cpr11_quot_min_lsvs },
+	{ 1017600, 1, 4, 53, 728, 164, 13, cpr11_targ_volt_svs, cpr11_quot_min_svs, cpr11_quot_offset },
+	{ .freq_khz = 1190400, .clk_src = 1, .max_core_count = 4, .lval = 62 },
+	{ 1497600, 1, 4, 78, 872, 204, 13, cpr11_targ_volt_nom, cpr11_quot_min_nom, cpr11_quot_offset },
+	{ .freq_khz = 1708800, .clk_src = 1, .max_core_count = 4, .lval = 89 },
+	{ 1900800, 1, 4, 99, 988, 192, 7, cpr11_targ_volt_tur, cpr11_quot_min_tur, cpr11_quot_offset },
+	{ 2208000, 1, 4, 115, 988, 192, 7, cpr11_targ_volt_boost, cpr11_quot_min_boost, cpr11_quot_offset },
 };
 
 vpp_t qti_vpp_table[] = {
@@ -378,7 +381,12 @@ static void publish_plan(uint32_t table_idx, vpp_voltage_setting_t *settings,
 	interpolate_quot(settings, setting_count);
 
 	qti_vpp_table[table_idx].cnt = setting_count;
+	qti_vpp_table[table_idx].osm_cnt = setting_count;
 	for (uint32_t i = 0; i < setting_count; i++) {
+		qti_vpp_table[table_idx].osm[i].clk_src = settings[i].clk_src;
+		qti_vpp_table[table_idx].osm[i].max_core_count = settings[i].max_core_count;
+		qti_vpp_table[table_idx].osm[i].lval = settings[i].lval;
+		qti_vpp_table[table_idx].osm[i].vc = settings[i].cprh.vc;
 		qti_vpp_table[table_idx].cprh[i] = settings[i].cprh;
 	}
 }
