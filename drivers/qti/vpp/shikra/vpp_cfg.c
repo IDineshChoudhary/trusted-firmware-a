@@ -278,7 +278,6 @@ static void init_base_values(vpp_voltage_setting_t *settings,
 		}
 
 		setting->cprh.vc = i;
-		setting->cprh.band = i;
 		setting->cprh.ceil_mV = fused_olv;
 		setting->cprh.floor_mV = fused_olv - floor_range;
 		setting->cprh.target_quot = fused_quot;
@@ -381,7 +380,6 @@ static void publish_plan(uint32_t table_idx, vpp_voltage_setting_t *settings,
 	interpolate_quot(settings, setting_count);
 
 	qti_vpp_table[table_idx].cnt = setting_count;
-	qti_vpp_table[table_idx].osm_cnt = setting_count;
 	for (uint32_t i = 0; i < setting_count; i++) {
 		qti_vpp_table[table_idx].osm[i].clk_src = settings[i].clk_src;
 		qti_vpp_table[table_idx].osm[i].max_core_count = settings[i].max_core_count;

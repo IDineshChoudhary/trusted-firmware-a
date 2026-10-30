@@ -63,18 +63,14 @@ static void qti_rimps_program_lut(const qti_rimps_clkdom_t *clkdom)
 					     clkdom->clk_name);
 	uint32_t row;
 
-	if ((plan == NULL) || (plan->cnt == 0U) || (plan->osm_cnt == 0U)) {
+	if ((plan == NULL) || (plan->cnt == 0U)) {
 		return;
 	}
 
 	for (row = 0U; row < QTI_OSM_LUT_ROWS; row++) {
-		uint32_t idx = MIN(row, (uint32_t)plan->osm_cnt - 1U);
+		uint32_t idx = MIN(row, (uint32_t)plan->cnt - 1U);
 		const vpp_osm_t *osm = &plan->osm[idx];
 		const vpp_cprh_t *cprh;
-
-		if (idx >= plan->cnt) {
-			return;
-		}
 
 		cprh = &plan->cprh[idx];
 		qti_rimps_program_lut_row(clkdom->base, row, osm, cprh);
