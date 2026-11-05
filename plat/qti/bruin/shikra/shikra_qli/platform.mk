@@ -47,6 +47,10 @@ PSCI_EXTENDED_STATE_ID			:=	1
 ARM_RECOM_STATE_ID_ENC 			:=	1
 PSCI_OS_INIT_MODE			:=	1
 
+# This QTI PSCI backend performs per-CPU GICR/CPU-interface sequencing in its
+# platform callbacks; do not also enable TF-A's generic PSCI GIC hooks.
+USE_GIC_DRIVER				:=	0
+
 # GIC-600 configuration
 GICV3_SUPPORT_GIC600			:=	1
 
@@ -84,7 +88,13 @@ PLAT_BL_COMMON_SOURCES	+=	common/desc_image_load.c				\
 				$(PLAT_PATH)/common/src/qti_common.c			\
 				${XLAT_TABLES_LIB_SRCS}
 
+# Shikra uses a per-core GICR enable-bitmap save/restore around CPU_SUSPEND.
+# Replace the generic all-redistributor context hooks with its local hooks;
+# this path does not save/restore the complete GICR context.
+GICV3_OVERRIDE_DISTIF_PWR_OPS	:=	1
+QTI_GIC_V3_OVERRIDE_SRC		:=	$(PLAT_PATH)/bruin/common/bruin_gic_v3.c
 include drivers/arm/gic/v3/gicv3.mk
+include plat/qti/common/qti_gic_v3.mk
 BL31_SOURCES		+=	drivers/delay_timer/generic_delay_timer.c		\
 				drivers/delay_timer/delay_timer.c			\
 				plat/common/plat_gicv3.c				\
@@ -93,6 +103,7 @@ BL31_SOURCES		+=	drivers/delay_timer/generic_delay_timer.c		\
 				$(PLAT_PATH)/common/src/pm_ps_hold.c			\
 				$(PLAT_PATH)/common/src/qti_bl31_setup.c		\
 				$(PLAT_PATH)/common/src/qti_gic_v3.c			\
+				${QTI_GIC_V3_PLAT_SOURCES}				\
 				$(PLAT_PATH)/common/src/qti_interrupt_svc.c		\
 				$(PLAT_PATH)/common/src/qti_syscall.c			\
 				$(PLAT_PATH)/bruin/common/bruin_topology.c		\

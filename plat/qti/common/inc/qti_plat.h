@@ -8,6 +8,7 @@
 #ifndef QTI_PLAT_H
 #define QTI_PLAT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <common/bl_common.h>
@@ -15,6 +16,8 @@
 #include <lib/cassert.h>
 #include <lib/el3_runtime/cpu_data.h>
 #include <lib/xlat_tables/xlat_tables_v2.h>
+
+#define QTI_GIC_PMR_LOWEST	U(0xFE)
 
 int qti_mmap_add_dynamic_region(uintptr_t base_pa, size_t size,
 				unsigned int attr);
@@ -35,7 +38,17 @@ void plat_qti_gic_init(void);
 void plat_qti_gic_cpuif_enable(void);
 void plat_qti_gic_cpuif_disable(void);
 void plat_qti_gic_pcpu_init(void);
+void plat_qti_gic_pcpu_suspend(void);
+void plat_qti_gic_pcpu_suspend_finish(void);
 const interrupt_prop_t *plat_qti_get_interrupt_props(unsigned int *num_props);
+
+/* Optional platform hooks for targets that lose GICR context across power loss. */
+void plat_qti_gic_pcpu_save(void);
+bool plat_qti_gic_pcpu_restore(void);
+
+
+/* Redistributor base address for core_pos, as registered with the GICv3 driver. */
+uintptr_t plat_qti_gic_rdistif_base_addr(unsigned int core_pos);
 
 unsigned int plat_qti_core_pos_by_mpidr(u_register_t mpidr);
 unsigned int plat_qti_my_cluster_pos(void);

@@ -1065,6 +1065,8 @@ void psci_warmboot_entrypoint(unsigned int cpu_idx)
 	unsigned int parent_nodes[PLAT_MAX_PWR_LVL] = {0};
 	psci_power_state_t state_info = { {PSCI_LOCAL_STATE_RUN} };
 
+	bool print_logs = psci_get_aff_info_state() != AFF_STATE_ON_PENDING;
+
 	/*
 	 * Verify that we have been explicitly turned ON or resumed from
 	 * suspend.
@@ -1080,9 +1082,11 @@ void psci_warmboot_entrypoint(unsigned int cpu_idx)
 	 */
 	end_pwrlvl = get_power_on_target_pwrlvl();
 
+	if(print_logs)NOTICE("[Later] 1084\n");
 	/* Get the parent nodes */
 	psci_get_parent_pwr_domain_nodes(cpu_idx, end_pwrlvl, parent_nodes);
 
+	if(print_logs)NOTICE("[Later] 1088\n");
 	/*
 	 * This function acquires the lock corresponding to each power level so
 	 * that by the time all locks are taken, the system topology is snapshot
@@ -1090,8 +1094,10 @@ void psci_warmboot_entrypoint(unsigned int cpu_idx)
 	 */
 	psci_acquire_pwr_domain_locks(end_pwrlvl, parent_nodes);
 
+	if(print_logs)NOTICE("[Later] 1096\n");
 	psci_get_target_local_pwr_states(cpu_idx, end_pwrlvl, &state_info);
 
+	if(print_logs)NOTICE("[Later] 1099\n");
 #if ENABLE_PSCI_STAT
 	plat_psci_stat_accounting_stop(&state_info);
 #endif
@@ -1114,13 +1120,16 @@ void psci_warmboot_entrypoint(unsigned int cpu_idx)
 		unsigned int max_off_lvl = psci_find_max_off_lvl(&state_info);
 
 		assert(max_off_lvl != PSCI_INVALID_PWR_LVL);
+		NOTICE("[LATER] Before psci_cpu_suspend_to_powerdown_finish\n");
 		psci_cpu_suspend_to_powerdown_finish(cpu_idx, max_off_lvl, &state_info, false);
+	        NOTICE("[LATER] After psci_cpu_suspend_to_powerdown_finish\n");
 	}
 
 	/*
 	 * Caches and (importantly) coherency are on so we can rely on seeing
 	 * whatever the primary gave us without explicit cache maintenance
 	 */
+	NOTICE("[LATER] 1126\n");
 	entry_point_info_t *ep = get_cpu_data(warmboot_ep_info);
 	cm_init_my_context(ep);
 
@@ -1129,14 +1138,17 @@ void psci_warmboot_entrypoint(unsigned int cpu_idx)
 	 * information that we had stashed away during the cpu_on
 	 * call to set this cpu on its way.
 	 */
+	NOTICE("[LATER] 1134\n");
 	cm_prepare_el3_exit_ns();
 
+	NOTICE("[LATER] 1138\n");
 	/*
 	 * Set the requested and target state of this CPU and all the higher
 	 * power domains which are ancestors of this CPU to run.
 	 */
 	psci_set_pwr_domains_to_run(cpu_idx, end_pwrlvl);
 
+	NOTICE("[LATER] 1145\n");
 #if ENABLE_PSCI_STAT
 	psci_stats_update_pwr_up(cpu_idx, end_pwrlvl, &state_info);
 #endif
@@ -1145,7 +1157,9 @@ void psci_warmboot_entrypoint(unsigned int cpu_idx)
 	 * This loop releases the lock corresponding to each power level
 	 * in the reverse order to which they were acquired.
 	 */
+	NOTICE("[LATER] 1154\n");
 	psci_release_pwr_domain_locks(end_pwrlvl, parent_nodes);
+	NOTICE("[END]\n");
 }
 
 /*******************************************************************************

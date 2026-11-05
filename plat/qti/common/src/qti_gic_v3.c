@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
+#include <arch_helpers.h>
 #include <common/bl_common.h>
 #include <drivers/arm/gicv3.h>
 
@@ -68,11 +69,29 @@ void gic_set_spi_routing(unsigned int id, unsigned int irm, u_register_t target)
 }
 
 /******************************************************************************
- * ARM common helper to enable the GIC CPU interface
+ * USE_GIC_DRIVER=0 leaves per-CPU GIC lifecycle management to the platform.
  *****************************************************************************/
 void plat_qti_gic_cpuif_enable(void)
 {
 	gicv3_cpuif_enable(plat_my_core_pos());
+
+	/*
+	 * Match Shikra TZ's warm-boot setup: HAL_QGIC_PRIORITY_LOWEST is 254
+	 * (0xFE). The generic TF-A helper initializes ICC_PMR_EL1 to 0xFF,
+	 * so restore the platform threshold before enabling Group 1 Non-secure.
+	 */
+	write_icc_pmr_el1(QTI_GIC_PMR_LOWEST);
+	dsbsy();
+
+	/*
+	 * gicv3_cpuif_enable() only restores EnableGrp1S; EnableGrp1NS is
+	 * cleared by gicv3_cpuif_disable() and nothing else sets it again.
+	 * Without this, EL3 keeps Non-secure Group 1 interrupts masked after
+	 * the first CPU_SUSPEND and Linux never takes another IRQ.
+	 */
+	write_icc_igrpen1_el3(read_icc_igrpen1_el3() |
+			       IGRPEN1_EL3_ENABLE_G1NS_BIT);
+	isb();
 }
 
 /******************************************************************************
@@ -102,4 +121,10 @@ void plat_qti_gic_redistif_on(void)
 void plat_qti_gic_redistif_off(void)
 {
 	gicv3_rdistif_off(plat_my_core_pos());
+}
+
+/* Expose a core's redistributor base for suspend-time pending-state diagnostics. */
+uintptr_t plat_qti_gic_rdistif_base_addr(unsigned int core_pos)
+{
+	return rdistif_base_addrs[core_pos];
 }

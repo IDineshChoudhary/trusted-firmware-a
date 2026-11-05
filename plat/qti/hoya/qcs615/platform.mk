@@ -10,6 +10,8 @@
 QTI_PLAT_PATH	:=	plat/qti
 CHIPSET			:=	${PLAT}
 
+include plat/qti/common/qti_gic_v3.mk
+
 # Turn On Separate code & data.
 SEPARATE_CODE_AND_RODATA		:=	1
 USE_COHERENT_MEM					:=	0
@@ -77,6 +79,7 @@ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_kryo4_silver.S	\
 				$(QTI_PLAT_PATH)/common/src/qti_common.c		\
 				$(QTI_PLAT_PATH)/common/src/qti_bl31_setup.c		\
 				$(QTI_PLAT_PATH)/common/src/qti_gic_v3.c		\
+				${QTI_GIC_V3_PLAT_SOURCES}				\
 				$(QTI_PLAT_PATH)/common/src/qti_interrupt_svc.c		\
 				$(QTI_PLAT_PATH)/common/src/qti_syscall.c		\
 				$(QTI_PLAT_PATH)/common/src/qti_topology.c		\

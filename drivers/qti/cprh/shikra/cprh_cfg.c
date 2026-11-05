@@ -6,6 +6,17 @@
 
 #include "../cprh_internal.h"
 
+#include <arch_helpers.h>
+#include <drivers/qti/chipinfo/chipinfo.h>
+#include <lib/mmio.h>
+
+#define SHIKRA_GOLD_CORES_DISABLED_MASK	0xc0U
+#define SHIKRA_CPRH_MASK_THREAD(thread)	(0x080cU + (0x440U * (thread)))
+#define SHIKRA_CPRH_THREAD_OVERRIDE_CTL(thread) \
+	(0x3c70U + (0x4U * (thread)))
+#define SHIKRA_CPRH_DISABLE_THREAD		(1U << 31U)
+#define SHIKRA_CPRH_GOLD_OVERRIDE_MASK		0x3U
+
 static const cprh_thread_cfg_t shikra_cprh_threads[] = {
 	{
 		.clk_name = "Silver",
@@ -47,3 +58,31 @@ const cprh_controller_cfg_t qti_cprh_controller = {
 	.thread_count = 3,
 	.threads = shikra_cprh_threads,
 };
+
+/* Mirror TZ's fuse-gated CPRH workaround around Silver's first OSM request. */
+void qti_cprh_gold_fused_off_workaround(bool after_silver_osm)
+{
+	uint32_t disabled_cpus;
+	uintptr_t reg;
+	uint32_t value;
+
+	if (chipinfo_get_disabled_cpus(0U, &disabled_cpus) != CHIPINFO_SUCCESS ||
+	    (disabled_cpus & SHIKRA_GOLD_CORES_DISABLED_MASK) !=
+	    SHIKRA_GOLD_CORES_DISABLED_MASK) {
+		return;
+	}
+
+	if (after_silver_osm) {
+		/* TZ sets IGNORE_OOL_FLR_AGGREGATION and OVERRIDE_OSM_FSM_OUTPUTS. */
+		reg = qti_cprh_controller.base_addr +
+		      SHIKRA_CPRH_THREAD_OVERRIDE_CTL(2U);
+		value = mmio_read_32(reg) | SHIKRA_CPRH_GOLD_OVERRIDE_MASK;
+	} else {
+		/* TZ disables CPRH thread 2 before Silver's initial OSM request. */
+		reg = qti_cprh_controller.base_addr + SHIKRA_CPRH_MASK_THREAD(2U);
+		value = mmio_read_32(reg) | SHIKRA_CPRH_DISABLE_THREAD;
+	}
+
+	mmio_write_32(reg, value);
+	dsbsy();
+}
