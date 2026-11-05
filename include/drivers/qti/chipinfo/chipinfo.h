@@ -1077,6 +1077,10 @@ enum chipinfo_family chipinfo_get_chip_family(void);
  */
 enum chipinfo_result qti_chipinfo_init(void);
 
+/* Read the boot-firmware disabled-CPU bitmask for a cluster. */
+enum chipinfo_result chipinfo_get_disabled_cpus(uint32_t cluster,
+						 uint32_t *disabled_mask);
+
 /*
  * Returns true if the given part instance is fused off on this SKU. part_idx 0
  * checks the flat disabled-features table; part_idx > 0 searches the

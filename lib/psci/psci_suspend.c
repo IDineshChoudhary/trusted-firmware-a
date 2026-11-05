@@ -234,18 +234,24 @@ int psci_cpu_suspend_start(unsigned int idx,
 #endif
 
 	if (is_power_down_state != 0U) {
+		NOTICE("[New] Inside is_power_down_state\n");
 		if (psci_plat_pm_ops->pwr_domain_pwr_down != NULL) {
 			/* This function may not return */
+			NOTICE("[New] Inside psci_plat_pm_ops->pwr_domain_pwr_down\n");
 			psci_plat_pm_ops->pwr_domain_pwr_down(state_info);
 		}
 
+		NOTICE("[New] Before psci_pwrdown_cpu_end_wakeup\n");
 		psci_pwrdown_cpu_end_wakeup(max_off_lvl);
+		NOTICE("[New] After psci_pwrdown_cpu_end_wakeup\n");
+
 	} else {
 		/*
 		 * We will reach here if only retention/standby states have been
 		 * requested at multiple power levels. This means that the cpu
 		 * context will be preserved.
 		 */
+		NOTICE("[New] INside else condition\n");
 		wfi();
 	}
 
@@ -273,8 +279,11 @@ int psci_cpu_suspend_start(unsigned int idx,
 	 * the system back to a usable state.
 	 */
 	if (is_power_down_state != 0U) {
+
+		NOTICE("[New] Second If condition\n");
 		psci_cpu_suspend_to_powerdown_finish(idx, max_off_lvl, state_info, true);
 	} else {
+		NOTICE("[New] INside Second else condition\n");
 		psci_cpu_suspend_to_standby_finish(end_pwrlvl, state_info);
 	}
 

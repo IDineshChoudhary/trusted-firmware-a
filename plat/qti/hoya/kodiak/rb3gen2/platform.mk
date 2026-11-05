@@ -9,6 +9,8 @@
 PLAT_PATH				:=	plat/qti
 CHIPSET					:=	kodiak
 
+include plat/qti/common/qti_gic_v3.mk
+
 RESET_TO_BL2				:=	1
 
 # Turn On Separate code & data.
@@ -85,6 +87,7 @@ BL31_SOURCES		+=	drivers/delay_timer/generic_delay_timer.c		\
 				$(PLAT_PATH)/common/src/pm_ps_hold.c			\
 				$(PLAT_PATH)/common/src/qti_bl31_setup.c		\
 				$(PLAT_PATH)/common/src/qti_gic_v3.c			\
+				${QTI_GIC_V3_PLAT_SOURCES}				\
 				$(PLAT_PATH)/common/src/qti_interrupt_svc.c		\
 				$(PLAT_PATH)/common/src/qti_syscall.c			\
 				$(PLAT_PATH)/common/src/qti_topology.c			\

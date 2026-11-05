@@ -84,6 +84,37 @@ bool chipinfo_is_part_disabled(enum chipinfo_part part, uint32_t part_idx)
 	return false;
 }
 
+enum chipinfo_result chipinfo_get_disabled_cpus(uint32_t cluster,
+						 uint32_t *disabled_mask)
+{
+	if (disabled_mask == NULL) {
+		return CHIPINFO_ERROR_INVALID_PARAMETER;
+	}
+
+	if (!chipinfo_ctxt.initialized) {
+		return CHIPINFO_ERROR_NOT_INITIALIZED;
+	}
+
+	/* Match TZ: no binning plan means cluster 0 has no disabled CPUs. */
+	if ((cluster == 0U) && (chipinfo_ctxt.num_clusters == 0U) &&
+	    (chipinfo_ctxt.disabled_cpu_clusters == NULL)) {
+		*disabled_mask = 0U;
+		return CHIPINFO_SUCCESS;
+	}
+
+	if (cluster >= chipinfo_ctxt.num_clusters) {
+		return CHIPINFO_ERROR_OUT_OF_RANGE_PARAMETER;
+	}
+
+	/* A non-zero declared cluster count with no valid array is malformed. */
+	if (chipinfo_ctxt.disabled_cpu_clusters == NULL) {
+		return CHIPINFO_ERROR_NOT_FOUND;
+	}
+
+	*disabled_mask = chipinfo_ctxt.disabled_cpu_clusters[cluster];
+	return CHIPINFO_SUCCESS;
+}
+
 enum chipinfo_result qti_chipinfo_init(void)
 {
 	struct platforminfo_smem *smem;
@@ -146,6 +177,16 @@ enum chipinfo_result qti_chipinfo_init(void)
 		uint32_t offset = smem->disabled_features_array_offset;
 		uint32_t num = smem->num_parts;
 		const uint32_t *features;
+		uint32_t cluster_offset = smem->cluster_array_offset;
+		uint32_t num_clusters = smem->num_clusters;
+
+		/* Keep the declared count even when the array bounds are invalid. */
+		chipinfo_ctxt.num_clusters = num_clusters;
+		if (smem_region_fits(size, cluster_offset, num_clusters,
+				     sizeof(uint32_t))) {
+			chipinfo_ctxt.disabled_cpu_clusters =
+				(const uint32_t *)((uintptr_t)smem + cluster_offset);
+		}
 
 		if (num > CHIPINFO_NUM_PARTS) {
 			num = CHIPINFO_NUM_PARTS;

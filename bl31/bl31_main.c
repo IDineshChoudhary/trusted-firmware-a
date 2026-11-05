@@ -278,7 +278,9 @@ void __no_pauth bl31_warmboot(void)
 	 * core after it finishes runtime initialization, provided the PFDI
 	 * service is enabled and has registered a callback.
 	 */
+	NOTICE("[SUPER LATE]\n");
 	pfdi_enable();
+	NOTICE("[GRAND FINALE]\n");
 }
 
 /*******************************************************************************

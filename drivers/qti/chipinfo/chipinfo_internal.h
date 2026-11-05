@@ -25,6 +25,9 @@ struct chipinfo_ctxt {
 	/* Per-instance table, snapshotted from SMEM at init time. */
 	struct part_instances insts[CHIPINFO_MAX_PART_INSTANCES];
 	uint32_t num_insts;
+	/* Read-only SMEM array of per-cluster disabled-CPU fuse masks. */
+	const uint32_t *disabled_cpu_clusters;
+	uint32_t num_clusters;
 };
 
 #endif /* CHIPINFO_INTERNAL_H */

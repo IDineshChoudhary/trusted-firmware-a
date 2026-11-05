@@ -11,16 +11,28 @@
 
 #define VPP_MAX_LUT_SIZE	40U
 
-typedef enum {
-	VPP_VLVL_LOWSVS		= 64,
-	VPP_VLVL_SVS		= 128,
-	VPP_VLVL_SVS_L1		= 192,
-	VPP_VLVL_NOM		= 256,
-	VPP_VLVL_NOM_L1		= 320,
-	VPP_VLVL_TUR		= 384,
-	VPP_VLVL_BOOST		= 488,
-	VPP_VLVL_INVALID	= 0x7fffffff,
-} vpp_vlvl_t;
+/* Keep the Shikra voltage-level ordering used by TZ vpp.h. */
+enum vpp_vlvl {
+	VPP_VLVL_OFF = 0,
+	VPP_VLVL_RET = 1,
+	VPP_VLVL_MINSVS = 2,
+	VPP_VLVL_LOWSVS = 3,
+	VPP_VLVL_SVS = 4,
+	VPP_VLVL_SVS_L1 = 5,
+	VPP_VLVL_NOM = 6,
+	VPP_VLVL_NOM_L1 = 7,
+	VPP_VLVL_NOM_L2 = 8,
+	VPP_VLVL_TUR = 9,
+	VPP_VLVL_TUR_L1 = 10,
+	VPP_VLVL_TUR_L2 = 11,
+	VPP_VLVL_TUR_L3 = 12,
+	VPP_VLVL_TUR_BOOST = 13,
+	VPP_VLVL_BOOST = 14,
+	VPP_VLVL_BOOSTP = 15,
+	VPP_VLVL_BIN = 16,
+	VPP_VLVL_TOTAL = 17,
+	VPP_VLVL_INVALID = 18,
+};
 
 typedef struct {
 	uint8_t vc;
@@ -32,10 +44,15 @@ typedef struct {
 } vpp_cprh_t;
 
 typedef struct {
+	uint32_t freq_khz;
 	uint8_t clk_src;
 	uint8_t max_core_count;
 	uint8_t lval;
 	uint8_t vc;
+	uint8_t vlvl;
+	uint32_t acd_acdcr;
+	uint32_t acd_acdsscr;
+	uint32_t acd_avg_cfg_2;
 } vpp_osm_t;
 
 typedef struct {
@@ -50,6 +67,7 @@ typedef struct {
 #ifdef QTI_VPP_ENABLED
 void qti_vpp_init(void);
 const vpp_t *qti_vpp_get_plan(const char *rail, const char *clk);
+
 #else
 static inline void qti_vpp_init(void)
 {
