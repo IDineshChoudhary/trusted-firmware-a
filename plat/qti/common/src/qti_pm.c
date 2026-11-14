@@ -47,6 +47,21 @@ static unsigned int qti_c4_pcu_log_count[PLATFORM_CORE_COUNT];
 
 volatile uint32_t break_before_lpms = 0;
 
+/*
+ * Breadcrumb instrumentation: Global array to track LPM progress per core.
+ * Lives in secure SRAM (.data section), retained even during cluster collapse.
+ * Use T32 hot-attach to dump this array post-mortem and identify where hang occurred.
+ * Address will be in build/shikra/release/bl31/bl31.map under tfa_lpm_step symbol.
+ */
+volatile uint32_t tfa_lpm_step[PLATFORM_CORE_COUNT] __attribute__((section(".data")));
+
+#define BREADCRUMB(core, val) do { \
+	if ((core) < PLATFORM_CORE_COUNT) { \
+		tfa_lpm_step[(core)] = (val); \
+		__asm__ volatile("dsb sy" ::: "memory"); \
+	} \
+} while (0)
+
 static bool qti_is_c4_candidate(unsigned int power_state)
 {
 	return (psci_get_pstate_type(power_state) == PSTATE_TYPE_POWERDOWN) &&
@@ -598,6 +613,15 @@ static void qti_pcu_unconfig_lpm(const psci_power_state_t *target_state)
 		mode_id = qti_pcu_cpu_mode(
 			target_state->pwr_domain_state[QTI_PWR_LVL0]);
 		if (mode_id >= 0) {
+			/*
+			 * Re-configure the sequencer before disarming it, per Mavros
+			 * pattern. This ensures the sequencer is re-synced and not
+			 * latched from the prior cycle. If skipped, cycle 2+ will
+			 * hang with "sequencer already busy" because SEQ_CTL=0 write
+			 * is ignored by a latched PCU state machine.
+			 */
+			qti_pcu_config_lpm_node(
+				(enum qtipmlib_lpm_node_id)core_pos, mode_id);
 			qti_pcu_unconfig_lpm_node(
 				(enum qtipmlib_lpm_node_id)core_pos, mode_id);
 		}
@@ -606,6 +630,10 @@ static void qti_pcu_unconfig_lpm(const psci_power_state_t *target_state)
 	mode_id = qti_pcu_l3_mode(
 		target_state->pwr_domain_state[QTI_PWR_LVL1]);
 	if (mode_id >= 0) {
+		/*
+		 * Same re-sync pattern for cluster L3 node.
+		 */
+		qti_pcu_config_lpm_node(QTIPMLIB_LPM_L3, mode_id);
 		qti_pcu_unconfig_lpm_node(QTIPMLIB_LPM_L3, mode_id);
 	}
 }
@@ -726,6 +754,8 @@ static void qti_node_suspend_finish(const psci_power_state_t *target_state)
 
 	unsigned int core_pos = plat_my_core_pos();
 
+	BREADCRUMB(core_pos, 0x33333333);	/* Wake started */
+
 	if (cpu_off) {
 		/* Reached only after the CPU has returned from the suspend WFI. */
 		NOTICE("QTI LPM: returned from PSCI/WFI core=%u cpu_state=%u "
@@ -758,6 +788,7 @@ static void qti_node_suspend_finish(const psci_power_state_t *target_state)
 	if (cpu_off) {
 		NOTICE("[%u] Before qti_pcu_unconfig_lpm\n", core_pos);
 		qti_pcu_unconfig_lpm(target_state);
+		BREADCRUMB(core_pos, 0x44444444);	/* PCU unconfig done */
 		NOTICE("[%u] After qti_pcu_unconfig_lpm\n", core_pos);
 	}
 #ifdef QTI_PMLIB_ENABLED
@@ -774,6 +805,7 @@ static void qti_node_suspend_finish(const psci_power_state_t *target_state)
 	if (cpu_off) {
 		NOTICE("[%u] Before plat_qti_gic_pcpu_suspend_finish\n", core_pos);
 		plat_qti_gic_pcpu_suspend_finish();
+		BREADCRUMB(core_pos, 0x55555555);	/* GIC restored, resuming to Linux */
 		NOTICE("[%u] After plat_qti_gic_pcpu_suspend_finish\n", core_pos);
 	}
 #ifdef QTI_PMLIB_ENABLED

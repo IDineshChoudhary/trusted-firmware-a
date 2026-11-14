@@ -155,11 +155,21 @@ void plat_qti_pwr_domain_on_finish(int core_pos, const uint8_t *states)
 
 	/* USE_GIC_DRIVER=0: initialize this core's redistributor here. */
 	plat_qti_gic_pcpu_init();
-	/* 
+
+	/*
+	 * Secondary cores boot with the CPU interface disabled. Enable it
+	 * so they can receive interrupts (including broadcast timer events).
+	 * Without this, cores on initial boot are deaf to IPI and timer
+	 * interrupts, forcing them into cpu_idle_poll() busy-wait instead
+	 * of entering idle C4 states.
+	 */
+	plat_qti_gic_cpuif_enable();
+
+	/*
 	 * TODO:
-	 * Stubbed function cpucp_clkdom_init 
+	 * Stubbed function cpucp_clkdom_init
 	 * as part of initial enablement.
-	 * cpucp_clkdom_init(); 
+	 * cpucp_clkdom_init();
 	 */
 }
 
