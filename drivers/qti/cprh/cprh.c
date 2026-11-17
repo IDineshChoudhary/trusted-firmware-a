@@ -22,10 +22,14 @@
 #define CPR_SENSOR_BYPASS_WRITE0		0x00E0U
 #define CPR_SENSOR_MASK_WRITE0			0x0120U
 #define CPR_SENSOR_THREAD(n)			(0x0200U + (0x4U * (n)))
+#define CPR_BIST_CHAIN_CHECK0			0x0020U
 #define CPR_MISC_REGISTER			0x0700U
 #define CPR_SAW_ERROR_STEP_LIMIT		0x07A4U
 #define CPR_MARGIN_TEMP_CORE_TIMERS		0x07A8U
 #define CPR_MARGIN_ADJ_CTL			0x07F8U
+#define CPRH_MISC_REGISTER2			0x3AACU
+#define CPRH_DCVS_SETTLE_TIMER_CONFIG		0x3C24U
+#define CPRH_ACD_DCVS_DISABLE_CONFIG		0x3C60U
 #define CPR_THRESHOLD(t)			(0x0808U + (0x440U * (t)))
 #define CPR_TARGET0(t, ro)			(0x0840U + (0x440U * (t)) + \
 						 (0x4U * (ro)))
@@ -35,14 +39,20 @@
 
 #define BITFIELD(mask, shift, val)		(((uint32_t)(val) << (shift)) & (mask))
 
+#define CPR_FSM_CTL_LOOP_EN			(1U << 0U)
+#define CPRH_CTL_DCVSH_ENABLED			(1U << 0U)
+
 #define CPR_FSM_CTL_INIT_MASK			0xFFFFFEFFU
 #define CPRH_CTL_INIT_MASK			0x1E01FFFFU
 #define CPR_STEP_QUOT_INIT_MASK		0x00000FFFU
 #define CPR_TIMER_CLAMP_INIT_MASK		0x08000000U
 #define CPR_SAW_ERROR_STEP_LIMIT_MASK		0x000003FFU
 #define CPR_MISC_REGISTER_INIT_MASK		0xFF00000CU
-#define CPR_MARGIN_ADJ_CTL_INIT_MASK		0x03FFF116U
+#define CPR_MARGIN_ADJ_CTL_INIT_MASK		0xFFFFF116U
 #define CPR_MARGIN_TEMP_CORE_TIMERS_MASK	0x1FFFFFFFU
+#define CPR_BIST_CHAIN_CHECK0_MASK		0x00000FFFU
+#define CPRH_DCVS_SETTLE_TIMER_CONFIG_MASK	0x00000020U
+#define SAW4_AVS_CTL_MASK			0xFFFFDF31U
 
 static bool cprh_initialized;
 
@@ -96,6 +106,14 @@ static void cprh_config_controller(const cprh_controller_cfg_t *cfg)
 	cprh_update(base, CPR_MARGIN_TEMP_CORE_TIMERS,
 		    CPR_MARGIN_TEMP_CORE_TIMERS_MASK,
 		    cfg->margin_temp_core_timers);
+	cprh_update(base, CPR_BIST_CHAIN_CHECK0, CPR_BIST_CHAIN_CHECK0_MASK,
+		    cfg->bist_chain_check);
+	cprh_write(base, CPRH_MISC_REGISTER2, cfg->misc_register2);
+	cprh_update(base, CPRH_DCVS_SETTLE_TIMER_CONFIG,
+		    CPRH_DCVS_SETTLE_TIMER_CONFIG_MASK,
+		    cfg->dcvs_settle_timer_config);
+	cprh_write(base, CPRH_ACD_DCVS_DISABLE_CONFIG,
+		   cfg->acd_dcvs_disable_config);
 	cprh_write(base, CPR_SENSOR_MASK_WRITE0, cfg->sensor_mask);
 	cprh_write(base, CPR_SENSOR_BYPASS_WRITE0, cfg->sensor_bypass_mask);
 
@@ -153,8 +171,12 @@ static void cprh_config_vc(uintptr_t base, uint8_t thread_num,
 		return;
 	}
 
+	/*
+	 * TZ's cprh_init_virtual_corner() sets close_loop_disable = FALSE for
+	 * the main operating corners; leaving CPR_CL_DISABLE set here tells
+	 * the FSM not to closed-loop correct this corner at all.
+	 */
 	value = BITFIELD(0x40000000U, 30, 1);
-	value |= BITFIELD(0x20000000U, 29, 1);
 	value |= BITFIELD(0x1E000000U, 25, entry->ro);
 	value |= BITFIELD(0x01FF0000U, 16, target_delta);
 	value |= BITFIELD(0x0000FF00U, 8, floor_voltage);
@@ -189,6 +211,33 @@ void qti_cprh_init(void)
 			cprh_config_vc(cfg->base_addr, thread->thread_num,
 				       &plan->cprh[j]);
 		}
+	}
+
+	/*
+	 * TZ's cprh_create_controller() leaves DCVSH_ENABLED/LOOP_EN clear
+	 * throughout all of the above config writes, then arms the
+	 * controller with these two calls as its final step. Without them
+	 * OSM's interface to CPR stays disabled and the CPR measurement FSM
+	 * never starts.
+	 */
+	cprh_update(cfg->base_addr, CPRH_CTL, CPRH_CTL_DCVSH_ENABLED,
+		    CPRH_CTL_DCVSH_ENABLED);
+	cprh_update(cfg->base_addr, CPR_FSM_CTL, CPR_FSM_CTL_LOOP_EN,
+		    CPR_FSM_CTL_LOOP_EN);
+
+	/*
+	 * TZ's cprh_saw_enable() arms the SAW4 AVS block (ramp/step-size/
+	 * width and the EN/CTL_SEL mux) so SAW actually acts on CPR's
+	 * voltage requests. Without this the above LOOP_EN/DCVSH_ENABLED
+	 * writes start the CPR measurement FSM with nothing downstream
+	 * consuming its output.
+	 */
+	if (cfg->saw4_avs_ctl_addr != 0U) {
+		uint32_t reg = mmio_read_32(cfg->saw4_avs_ctl_addr);
+
+		reg &= ~SAW4_AVS_CTL_MASK;
+		reg |= cfg->saw4_avs_ctl & SAW4_AVS_CTL_MASK;
+		mmio_write_32(cfg->saw4_avs_ctl_addr, reg);
 	}
 
 	cprh_initialized = true;

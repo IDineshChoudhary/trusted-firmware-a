@@ -10,6 +10,7 @@
 #include <arch_helpers.h>
 #include <bl31/bl31.h>
 #include <common/debug.h>
+#include <drivers/console.h>
 #include <drivers/delay_timer.h>
 #include <drivers/qti/chipinfo/chipinfo.h>
 #include <drivers/qti/qtipmlib/qtipmlib.h>
@@ -45,7 +46,15 @@
 static unsigned int qti_c4_validate_log_count[PLATFORM_CORE_COUNT];
 static unsigned int qti_c4_pcu_log_count[PLATFORM_CORE_COUNT];
 
-volatile uint32_t break_before_lpms = 0;
+/*
+ * Debug UART's clock/power domain does not survive every core being in C4
+ * at once -- once the last core collapses, there's nothing left to sustain
+ * the rail/clock the console depends on. Track how many cores are currently
+ * sitting in C4 and never grant it to a core if that would leave none
+ * outside it, so at least one core always stays up for console visibility.
+ */
+static spinlock_t qti_c4_count_lock;
+static unsigned int qti_c4_active_count;
 
 /*
  * Breadcrumb instrumentation: Global array to track LPM progress per core.
@@ -59,6 +68,28 @@ volatile uint32_t tfa_lpm_step[PLATFORM_CORE_COUNT] __attribute__((section(".dat
 	if ((core) < PLATFORM_CORE_COUNT) { \
 		tfa_lpm_step[(core)] = (val); \
 		__asm__ volatile("dsb sy" ::: "memory"); \
+		clean_dcache_range((uintptr_t)&tfa_lpm_step[(core)], \
+				   sizeof(tfa_lpm_step[(core)])); \
+	} \
+} while (0)
+
+/*
+ * cntpct_el0 is the always-on physical counter: its count keeps advancing
+ * even while a core is power-collapsed, so a timestamp taken right before
+ * entering the suspend WFI and another right at resume entry lets us read,
+ * post-mortem, exactly how long (in counter ticks) the core spent between
+ * "requested power-down" and "back executing TF-A code" -- or, if resume
+ * never happens, the resume slot simply stays at its last value while the
+ * suspend slot shows when the attempt started.
+ */
+volatile uint64_t tfa_lpm_suspend_ts[PLATFORM_CORE_COUNT] __attribute__((section(".data")));
+volatile uint64_t tfa_lpm_resume_ts[PLATFORM_CORE_COUNT] __attribute__((section(".data")));
+#define LPM_TIMESTAMP(array, core) do { \
+	if ((core) < PLATFORM_CORE_COUNT) { \
+		(array)[(core)] = read_cntpct_el0(); \
+		__asm__ volatile("dsb sy" ::: "memory"); \
+		clean_dcache_range((uintptr_t)&(array)[(core)], \
+				   sizeof((array)[(core)])); \
 	} \
 } while (0)
 
@@ -451,8 +482,6 @@ int qti_validate_power_state(unsigned int power_state,
 
 	assert(req_state);
 
-	//unsigned int core_pos1 = plat_my_core_pos();
-	//if(!break_before_lpms)NOTICE("[Linux][%u] Inside qti_validate_power_state, power_state: %u", core_pos1, power_state);
 	/*
 	 *  Currently we are using a linear search for finding the matching
 	 *  entry in the idle power state array. This can be made a binary
@@ -496,6 +525,20 @@ int qti_validate_power_state(unsigned int power_state,
 		     "id=%07x matched=1 index=%d rc=%d\n", core_pos,
 		     power_state, psci_get_pstate_id(power_state), i,
 		     PSCI_E_SUCCESS);
+	}
+
+	if (c4_candidate) {
+		bool would_strand_console;
+
+		spin_lock(&qti_c4_count_lock);
+		would_strand_console =
+			(qti_c4_active_count + 1U) >= PLATFORM_CORE_COUNT;
+		spin_unlock(&qti_c4_count_lock);
+
+		if (would_strand_console) {
+			/* Keep at least one core out of C4 for console visibility. */
+			return PSCI_E_INVALID_PARAMS;
+		}
 	}
 
 	i = 0;
@@ -627,15 +670,15 @@ static void qti_pcu_unconfig_lpm(const psci_power_state_t *target_state)
 		}
 	}
 
-	mode_id = qti_pcu_l3_mode(
-		target_state->pwr_domain_state[QTI_PWR_LVL1]);
-	if (mode_id >= 0) {
-		/*
-		 * Same re-sync pattern for cluster L3 node.
-		 */
-		qti_pcu_config_lpm_node(QTIPMLIB_LPM_L3, mode_id);
-		qti_pcu_unconfig_lpm_node(QTIPMLIB_LPM_L3, mode_id);
-	}
+	/*
+	 * L3 is intentionally not unconfigured here: qtipmlib_unconfig_lpm()
+	 * unconditionally rejects QTIPMLIB_LPM_L3 with QTIPMLIB_E_INVAL (it is
+	 * a shared node, not a per-CPU one -- see the comment above
+	 * qtipmlib_unconfig_lpm() in pcu.c), and qti_pcu_unconfig_lpm_node()
+	 * panics on any non-SUCCESS return. qti_pcu_config_lpm() rewrites
+	 * SHIKRA_APSS_CL_IPM's SEQ_CTL unconditionally on every entry, so the
+	 * L3 PCU sequencer needs no explicit disarm between cycles.
+	 */
 }
 
 static void qti_cpu_power_on_finish(const psci_power_state_t *target_state)
@@ -699,9 +742,51 @@ static void qti_node_power_off(const psci_power_state_t *target_state)
 	}
 }
 
+/*
+ * Diagnostic: dump GICR_ISENABLER0 for this core's redistributor around a
+ * CPU_SUSPEND cycle, to check whether the per-interrupt enable bitmap
+ * (including the SGI used for IPIs) actually survives core-level C3/C4
+ * power collapse, as opposed to only the cluster-level D4 case TZ's
+ * register dumps already validated.
+ *
+ * Pre-suspend runs before WFI, with the console confirmed alive, so it
+ * prints directly. Post-resume deliberately does NOT touch the console:
+ * the debug-UART's clock/power domain is itself suspect of not surviving
+ * C4, which would make the print the stuck operation. Store to SRAM
+ * instead and read it back post-mortem (after any hang/NMI has already
+ * fully happened) via T32, same as tfa_lpm_step[].
+ */
+static void qti_gic_isenabler0_dump(unsigned int core_pos, const char *tag)
+{
+	uintptr_t gicr_base = plat_qti_gic_rdistif_base_addr(core_pos);
+
+	if (gicr_base == 0U) {
+		return;
+	}
+
+	NOTICE("[%u] GICR_ISENABLER0 %s = 0x%x\n", core_pos, tag,
+	       mmio_read_32(gicr_base + GICR_ISENABLER0));
+	console_flush();
+}
+
+volatile uint32_t qti_gicr_isenabler0_post[PLATFORM_CORE_COUNT]
+	__attribute__((section(".data")));
+
+static void qti_gic_isenabler0_store_post(unsigned int core_pos)
+{
+	uintptr_t gicr_base = plat_qti_gic_rdistif_base_addr(core_pos);
+
+	if ((gicr_base == 0U) || (core_pos >= PLATFORM_CORE_COUNT)) {
+		return;
+	}
+
+	qti_gicr_isenabler0_post[core_pos] =
+		mmio_read_32(gicr_base + GICR_ISENABLER0);
+	__asm__ volatile("dsb sy" ::: "memory");
+}
+
 static void qti_node_suspend(const psci_power_state_t *target_state)
 {
-	while(break_before_lpms);
 	bool cpu_off = is_cpu_off(target_state);
 	uint32_t cpu_state = target_state->pwr_domain_state[QTI_PWR_LVL0];
 
@@ -725,6 +810,7 @@ static void qti_node_suspend(const psci_power_state_t *target_state)
 #endif
 	/* Match TZ: arm the PCU first, then disable all CPU-interface groups. */
 	if (cpu_off) {
+		qti_gic_isenabler0_dump(plat_my_core_pos(), "pre-suspend");
 		plat_qti_gic_pcpu_suspend();
 	}
 #ifdef QTI_PMLIB_ENABLED
@@ -736,6 +822,11 @@ static void qti_node_suspend(const psci_power_state_t *target_state)
 #endif
 	plat_qti_pwr_domain_suspend((const uint8_t *)target_state->pwr_domain_state);
 	if (cpu_off) {
+		if (cpu_state == QTI_LOCAL_STATE_DEEPOFF) {
+			spin_lock(&qti_c4_count_lock);
+			qti_c4_active_count++;
+			spin_unlock(&qti_c4_count_lock);
+		}
 		qti_set_cpupwrctlr_val();
 		/* PSCI executes WFI after this callback; that is the PCU trigger. */
 		NOTICE("QTI LPM: PCU armed; returning to PSCI/WFI core=%u "
@@ -743,10 +834,14 @@ static void qti_node_suspend(const psci_power_state_t *target_state)
 		       plat_my_core_pos(), cpu_state,
 		       (unsigned int)target_state->pwr_domain_state[QTI_PWR_LVL1]);
 	}
+	BREADCRUMB(plat_my_core_pos(), 0xD9D9D9D9);
+	LPM_TIMESTAMP(tfa_lpm_suspend_ts, plat_my_core_pos());
 }
 
 static void qti_node_suspend_finish(const psci_power_state_t *target_state)
 {
+	BREADCRUMB(plat_my_core_pos(), 0xC9C9C9C9);
+	LPM_TIMESTAMP(tfa_lpm_resume_ts, plat_my_core_pos());
 	const uint8_t *pwr_states =
 	    (const uint8_t *)target_state->pwr_domain_state;
 	bool cpu_off = is_cpu_off(target_state);
@@ -755,6 +850,14 @@ static void qti_node_suspend_finish(const psci_power_state_t *target_state)
 	unsigned int core_pos = plat_my_core_pos();
 
 	BREADCRUMB(core_pos, 0x33333333);	/* Wake started */
+
+	if (cpu_off && (cpu_state == QTI_LOCAL_STATE_DEEPOFF)) {
+		spin_lock(&qti_c4_count_lock);
+		if (qti_c4_active_count > 0U) {
+			qti_c4_active_count--;
+		}
+		spin_unlock(&qti_c4_count_lock);
+	}
 
 	if (cpu_off) {
 		/* Reached only after the CPU has returned from the suspend WFI. */
@@ -802,11 +905,16 @@ static void qti_node_suspend_finish(const psci_power_state_t *target_state)
 
 	plat_qti_pwr_domain_suspend_finish(pwr_states);
 	NOTICE("[%u] After plat_qti_pwr_domain_suspend_finish\n", core_pos);
+	BREADCRUMB(core_pos, 0x4A4A4A4A);	/* plat_qti_pwr_domain_suspend_finish returned */
 	if (cpu_off) {
+		BREADCRUMB(core_pos, 0x4B4B4B4B);	/* about to call plat_qti_gic_pcpu_suspend_finish */
 		NOTICE("[%u] Before plat_qti_gic_pcpu_suspend_finish\n", core_pos);
 		plat_qti_gic_pcpu_suspend_finish();
-		BREADCRUMB(core_pos, 0x55555555);	/* GIC restored, resuming to Linux */
+
 		NOTICE("[%u] After plat_qti_gic_pcpu_suspend_finish\n", core_pos);
+		BREADCRUMB(core_pos, 0x55555555);	/* GIC restored, resuming to Linux */
+		qti_gic_isenabler0_store_post(core_pos);
+		BREADCRUMB(core_pos, 0x5C5C5C5C);	/* GICR_ISENABLER0 post-resume stored */
 	}
 #ifdef QTI_PMLIB_ENABLED
 	if (cpu_off) {

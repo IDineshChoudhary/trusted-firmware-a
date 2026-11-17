@@ -10,6 +10,9 @@
 #include <drivers/qti/chipinfo/chipinfo.h>
 #include <lib/mmio.h>
 
+#define SHIKRA_SILVER_SAW4_SRM_BASE		0x0F900900UL
+#define SHIKRA_SILVER_SAW4_AVS_CTL		(SHIKRA_SILVER_SAW4_SRM_BASE + 0x4U)
+
 #define SHIKRA_GOLD_CORES_DISABLED_MASK	0xc0U
 #define SHIKRA_CPRH_MASK_THREAD(thread)	(0x080cU + (0x440U * (thread)))
 #define SHIKRA_CPRH_THREAD_OVERRIDE_CTL(thread) \
@@ -48,8 +51,14 @@ const cprh_controller_cfg_t qti_cprh_controller = {
 	.timer_clamp = 0x08000000,
 	.saw_error_step_limit = 0x21,
 	.misc_register = 0x61000004,
-	.margin_adj_ctl = 0x01024000,
+	.margin_adj_ctl = 0x15024114,
 	.margin_temp_core_timers = 0x005CCB00,
+	.bist_chain_check = 0x42,
+	.misc_register2 = 0xFFF52AF0,
+	.dcvs_settle_timer_config = 0x20,
+	.acd_dcvs_disable_config = 0x1E000,
+	.saw4_avs_ctl_addr = SHIKRA_SILVER_SAW4_AVS_CTL,
+	.saw4_avs_ctl = 0x0101C031,
 	.sensor_count = 10,
 	.sensor_thread_mask = 0x0F,
 	.sensor_thread_mask_thread2 = 0x380,

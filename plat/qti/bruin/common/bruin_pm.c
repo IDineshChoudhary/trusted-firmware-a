@@ -9,6 +9,7 @@
 
 #include <arch_helpers.h>
 #include <common/debug.h>
+#include <drivers/console.h>
 #include <drivers/delay_timer.h>
 #include <drivers/arm/gicv3.h>
 #include <lib/mmio.h>
@@ -35,6 +36,26 @@
 
 static uint32_t saved_gicr_isenabler[PLATFORM_CORE_COUNT];
 static bool saved_gicr_isenabler_valid[PLATFORM_CORE_COUNT];
+
+/*
+ * Shared with qti_pm.c: SRAM breadcrumb array, retained across a power
+ * collapse. UART/NOTICE prints are deliberately NOT used in this window:
+ * the debug-UART's own clock/power domain is itself suspect of not
+ * surviving C4, which would make a console write the stuck operation and
+ * give a false "code never got here" signal. SRAM stores have no such
+ * dependency. Do not attach T32 until AFTER the hang/watchdog-NMI has
+ * already fully happened - reading these values post-mortem is safe;
+ * attaching while the event is still in progress (DBGPWRUPREQ) is exactly
+ * what would perturb the thing being measured.
+ */
+extern volatile uint32_t tfa_lpm_step[PLATFORM_CORE_COUNT];
+
+#define GIC_FINISH_STEP(core, val) do { \
+	if ((core) < PLATFORM_CORE_COUNT) { \
+		tfa_lpm_step[(core)] = (val); \
+		__asm__ volatile("dsb sy" ::: "memory"); \
+	} \
+} while (0)
 
 /* Shikra APSS HPG 2.6.4: divider encoding 2 means divide by 3. */
 #define MEM_SEQ_CLK_DIV_RATIO_SHIFT	16U
@@ -191,17 +212,39 @@ void plat_qti_gic_pcpu_suspend(void)
 
 void plat_qti_gic_pcpu_suspend_finish(void)
 {
+	unsigned int core_pos = plat_my_core_pos();
+
+	GIC_FINISH_STEP(core_pos, 0x5A000001U);	/* entered function */
+
+	/*
+	 * ICC_SRE_EL3.SRE is a per-PE system register. gicv3_cpuif_enable()
+	 * (the only place that normally sets it) runs on cold boot and
+	 * CPU_ON, never on the CPU_SUSPEND resume path. If C4 resets this
+	 * core's system registers to their architectural reset value, SRE
+	 * comes back 0 and every ICC_* access below is an illegal
+	 * instruction, trapping to EL3 right as the console rail is also
+	 * gone -- re-arm it unconditionally before touching anything else.
+	 */
+	write_icc_sre_el3(read_icc_sre_el3() | ICC_SRE_SRE_BIT);
+	isb();
+
 	/* Match TZ: restore the NS priority threshold before reopening G1. */
 	write_icc_pmr_el1(QTI_GIC_PMR_LOWEST);
+	GIC_FINISH_STEP(core_pos, 0x5A000002U);	/* PMR write done */
 	dsbsy();
+	GIC_FINISH_STEP(core_pos, 0x5A000003U);	/* 1st dsbsy returned */
 
 	write_icc_igrpen0_el1(read_icc_igrpen0_el1() |
 			      IGRPEN1_EL1_ENABLE_G0_BIT);
+	GIC_FINISH_STEP(core_pos, 0x5A000004U);	/* IGRPEN0 write done */
 	write_icc_igrpen1_el3(read_icc_igrpen1_el3() |
 			      (IGRPEN1_EL3_ENABLE_G1S_BIT |
 			       IGRPEN1_EL3_ENABLE_G1NS_BIT));
+	GIC_FINISH_STEP(core_pos, 0x5A000005U);	/* IGRPEN1_EL3 write done */
 	isb();
+	GIC_FINISH_STEP(core_pos, 0x5A000006U);	/* isb returned */
 	dsbsy();
+	GIC_FINISH_STEP(core_pos, 0x5A000007U);	/* 2nd dsbsy returned, function exiting */
 }
 
 /*
@@ -287,16 +330,30 @@ void plat_qti_pwr_domain_off(const uint8_t *states)
 	dsbsy();
 }
 
+/*
+ * Shikra TZ's l3_config_lpm()/l3_unconfig_lpm() (asic_nodes.c) never touch
+ * any GIC register for cluster-level D4, and the APSS_GICSLP_CTRL FSM that
+ * gates the L3 rail handshake is documented by TZ (gic-fsm.c) as a VddMin
+ * handshake, not a power-collapse/retention-loss handshake. Captured
+ * before/after D4 GICR dumps (shikra_lpms/shikra_lpm_dump_capture_*.txt)
+ * confirm this on real silicon: WAKER, ISENABLER0, IPRIORITYRn, IGROUPR0 and
+ * IGRPMODR0 are bit-for-bit identical across a D4 cycle for all four cores
+ * (only ISPENDR0 differs, as expected from live interrupt activity). The
+ * GIC-600 distributor/redistributors do not lose context across D4, so no
+ * save/restore is needed here.
+ */
 void plat_qti_pwr_domain_suspend(const uint8_t *states)
 {
-	/* Shikra TZ does not mask P-channel wake in PSCI_CONTEXT_SUSPEND. */
 	(void)states;
 }
 
 void plat_qti_pwr_domain_suspend_finish(const uint8_t *states)
 {
+	dsb();
+	isb();
+	volatile uint64_t dummy = read_cntpct_el0();
+	(void)dummy;
 	(void)states;
-	/* qti_node_suspend_finish() restores the GIC groups before this hook. */
 }
 
 void plat_qti_invoke_unhandled_isr(uint32_t id, void *handle)
@@ -313,12 +370,22 @@ const unsigned int *plat_qti_pm_idle_states(void)
 		/* Shikra CPU PCU mode 3 is C3. */
 		qti_make_pwrstate_lvl0(QTI_LOCAL_STATE_OFF,
 				       PSTATE_TYPE_POWERDOWN),
-		/* CPU-level DEEPOFF/C4 is intentionally enabled for LPM support.
-		 * The coupled level-1/L3 DEEPOFF state remains unavailable until its
-		 * separate cluster sequencing and ownership path is implemented.
-		 */
+		/* CPU-level DEEPOFF/C4. */
 		qti_make_pwrstate_lvl0(QTI_LOCAL_STATE_DEEPOFF,
 				       PSTATE_TYPE_POWERDOWN),
+		/*
+		 * Cluster-level D4: the generic PSCI layer only grants this
+		 * composite state to a core when every sibling is also idle
+		 * at CPU-level DEEPOFF, at which point the last core down
+		 * also requests level-1 DEEPOFF to collapse the shared L3
+		 * rail. Must stay last/deepest in this array: both
+		 * qti_get_sys_suspend_power_state() (system suspend) and
+		 * PSCI's own deepest-state search pick the last non-zero
+		 * entry here.
+		 */
+		//qti_make_pwrstate_lvl1(QTI_LOCAL_STATE_DEEPOFF,
+		//		       QTI_LOCAL_STATE_DEEPOFF,
+		//		       PSTATE_TYPE_POWERDOWN),
 		0,
 	};
 

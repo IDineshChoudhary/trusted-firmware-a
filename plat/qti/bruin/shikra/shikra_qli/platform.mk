@@ -88,11 +88,11 @@ PLAT_BL_COMMON_SOURCES	+=	common/desc_image_load.c				\
 				$(PLAT_PATH)/common/src/qti_common.c			\
 				${XLAT_TABLES_LIB_SRCS}
 
-# Shikra uses a per-core GICR enable-bitmap save/restore around CPU_SUSPEND.
-# Replace the generic all-redistributor context hooks with its local hooks;
-# this path does not save/restore the complete GICR context.
-GICV3_OVERRIDE_DISTIF_PWR_OPS	:=	1
-QTI_GIC_V3_OVERRIDE_SRC		:=	$(PLAT_PATH)/bruin/common/bruin_gic_v3.c
+# Shikra uses a per-core GICR enable-bitmap save/restore around CPU_SUSPEND
+# and does not call gicv3_rdistif_save()/gicv3_rdistif_init_restore(), so the
+# generic arm_gicv3_common.c pre_save()/post_restore() LPI-pending-table
+# hooks are never reached. Leave GICV3_OVERRIDE_DISTIF_PWR_OPS at its default
+# (0) like every other QTI platform instead of stubbing them out.
 include drivers/arm/gic/v3/gicv3.mk
 include plat/qti/common/qti_gic_v3.mk
 BL31_SOURCES		+=	drivers/delay_timer/generic_delay_timer.c		\
